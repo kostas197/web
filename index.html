@@ -62,10 +62,10 @@ Type help for a list of commands
 
     input.addEventListener('keydown', async (e) => {
       if (e.key === 'Enter') {
-        const cmd = input.value.trim();
+        const cmd = input.value.trim().toLowerCase();
 	      print('[kostas@personalweb]$ ' + cmd);
         input.value = '';
-	if (cmd === 'help' || cmd === 'HELP')
+	if (cmd === 'help')
 	      print('\nclean --> reload the main page\nfeh photos --> take a look of my public photo album\n\nget avionics.cv --> download my cv\nget sysadmin.cv --> download my cv\n\nemailme MESSAGE ---> (DISABLE FOR NOW)send me a message with your email / phone  details, so I can reply you\ncat projects.roles --> list of latest projects and roles\ncat skills --> list of technologies and tools');
         else if (cmd === 'get avionics.cv') {
           print('Redirecting to avionics resume / CV...');
@@ -88,7 +88,10 @@ Type help for a list of commands
         else if (cmd === 'clean') {
           window.location.href = './index.html';
         }
-  }
+	else {
+		print('command not found, type help for a list of commands');
+	}
+      }
     });
   </script>
 </body>
