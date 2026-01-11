@@ -1,0 +1,53 @@
+body{
+	background: #000;
+	color: #00ff00;
+	font-family: monospace;
+	font-size: 18px;
+	#padding: 20px;
+}
+
+a{
+	color: yellow;
+}
+
+.main_list_container{
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.main_list_container ul {
+	list-style-type: none;
+	padding: 0;
+	margin-top: 5rem;
+}
+
+#terminal{
+	white-space: pre-wrap;
+	min-height: 300px;
+}
+
+li{
+	padding: 1.5rem;
+	font-size: 1.4rem;
+}
+
+h1{
+	font-size: 1.8rem;
+	margin: 10px;
+}
+
+input{
+	background: #144215;
+	color: #00ff00;
+	border: none;
+	outline: none;
+	font-family: monospace;
+	font-size: 18px;
+}
+@media (max-width: 767px) {
+            div[style*="display: flex"] {
+                flex-direction: column;
+                align-items: center;
+            }
+        }

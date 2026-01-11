@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Kostas | avionics | Linux  &#128187; &#128640;</title>
+	<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚁</text></svg>">
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+	<p>Welcome to this tiny console, with more options</p>
+	<p>Type help for a list of commands</p>
+</pre>
+<div id="terminal"></div>
+<span>[kostas@personalweb]$</span><input id="input" autofocus />
+
+<script>
+    const terminal = document.getElementById('terminal');
+    const input = document.getElementById('input');
+
+    function print(text) {
+      terminal.textContent += text + "\n";
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    input.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        const cmd = input.value.trim().toLowerCase();
+	      print('[kostas@personalweb]$ ' + cmd);
+        input.value = '';
+	if (cmd === 'help')
+	      print('\ncat projects.roles --> list of latest projects and roles\ncat skills --> list of technologies and tools\nclean --> reload the main page\n\nget avionics.cv --> download my cv\nget sysadmin.cv --> download my cv\n\nemailme MESSAGE ---> (DISABLE FOR NOW)send me a message with your email / phone  details, so I can reply you\nwhoami --> little description\n');
+        else if (cmd === 'get avionics.cv') {
+          print('Redirecting to avionics resume / CV...');
+          window.location.href = 'https://docs.google.com/document/d/14Nhu4Zd-quQk4_yj8cH_iUT0aeL862zJfZWmOpK2NZs/edit?usp=sharing';
+        }
+        else if (cmd === 'get sysadmin.cv') {
+          print('Redirecting to sysadmin resume / CV...');
+          window.location.href = 'https://docs.google.com/document/d/1_hjUCOGr8DvaIcvonnhHL9x07wEjCEtWTbxAd8IIqpI/edit?usp=sharing';
+        }
+        else if (cmd === 'cat projects.roles') {
+		print('\n*Realtime flight radar*\ncheck it now on: https://vuelos.kmc.ar\ncode: https://github.com/kostas197/mapa_cullen\n\n*On site IT, sole sysadmin at remote base*\nSingle-hand operated and secured all local IT for a remote base. Key duties included maintaining 24/7 connectivy VPN link to headquarters, and adminitrating a hybrid environment hosting Linux and Windows, and responsability of the AD domain.\n\n*Avionics technician for H145 / BK117C2 fleet skilled in offshore operations\n');
+        }
+        else if (cmd === 'cat skills') {
+          print('\n\nHypervisors: Proxmox, VMware\n\nOS: Linux (Arch, Debian, Rocky) , Windows® / Windows server AD\n\nDatabases: MariaDB, postgreSQL, MongoDB\n\nMonitoring: Zabbix, Grafana\n\nNetworking: DNS, DHCP, NAS, iptables, OpenWRT, VLANs, OpenVPN, Wireguard\n\nDevOps: git, terraform, ansible\n\nCloud: AWS, GCP\n\nMainframe: Basic acknowledge on IBM Z/OS / AIX\n\n');
+        }
+        else if (cmd === 'clean') {
+          window.location.href = './console.html';
+        }
+        else if (cmd === 'whoami') {
+          print('\nAvionics Technician with a SYSADMIN taste | Linux/Windows, Networking , Automation\n\n🚀 Linux user since my teenage years - yes, I still have those free Ubuntu CDs Canonical used to mail out!\n\n📚 My first \'production server\' was a Debian box in high school, trying to run a forum for my classmates.\nI manually configured everything in /etc/, built the entire stack from scratch...\nthough let\'s be honest, uptime was probably 70% max (thanks, unreliable Telefónica Speedy! 😅).\nBut hey, it worked well enough for sharing homework assignments!\n\n⚡ Technical school trained me in electronics, digital systems, and microcontroller programming in C/Assembly.\n\n✈️ Today I\'m a certified Avionics Engineer by day - keeping aircraft systems running safely!\n\n🏠 By night? I maintain my home \'data center\' (okay, it\'s a tiny rack with some blinking lights 😄):\n• WireGuard VPN • Nginx reverse proxy • Print server (CUPS) • Flight tracking (ADS-B receiver)\n• Home Assistant • Docker everything • Proxmox hypervisor • and other geeky toys!\n\n🔧 Constantly learning, always tinkering - because why have free time when you can have more servers to maintain? 💻' );
+        }
+        else if (cmd === 'ls') {
+		print('drwxr-xr-x 4 kostas kostas 4096 ene  8 01:46 .\ndrwxr-xr-x 3 kostas kostas 4096 ene  8 00:27 ..\n-rw-r--r-- 2 kostas kostas  427 ene  8 01:41 index.html\ndrwxr-xr-x 2 kostas kostas 4096 ene  8 01:40 projects.roles\ndrwxr-xr-x 2 kostas kostas 4096 ene  8 01:40 skills\n');
+	}
+	else {
+		print('command not found, type help for a list of commands');
+	}
+      }
+    });
+  </script>
+</body>
+</html>
+
