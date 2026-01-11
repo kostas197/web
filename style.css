@@ -10,6 +10,16 @@ a{
 	color: yellow;
 }
 
+.content-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4rem; /* Space between menu and carousel */
+  padding: 2rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .main_list_container{
 	display: flex;
 	justify-content: center;
@@ -19,7 +29,7 @@ a{
 .main_list_container ul {
 	list-style-type: none;
 	padding: 0;
-	margin-top: 5rem;
+	margin: 0; /* Reset margin, spacing is handled by .content-wrapper */
 }
 
 #terminal{
@@ -34,6 +44,14 @@ li{
 
 h1{
 	font-size: 1.8rem;
+	padding-left: 20px; /* Add some padding around the title */
+	padding-bottom: 3px;
+}
+h6{
+	font-size: 1.0rem;
+	padding-left: 20px; /* Add some padding around the title */
+	padding-top: 0px;
+	margin: 0px;
 }
 
 input{
@@ -48,8 +66,8 @@ input{
 /* --- Simple CSS Carousel --- */
 .simple-carousel {
   width: 100%;
-  max-width: 300px; /* A fixed viewport for the carousel */
-  margin: 2rem auto;
+  max-width: 250px; /* Reduced image size */
+  margin: 0; /* Reset margin, spacing is handled by .content-wrapper */
   overflow: hidden;   /* Hides the image that is not active */
   border-radius: 5px;
 }
@@ -79,3 +97,12 @@ input{
   /* Back to start for the loop */
   100% { transform: translateX(0%); }   /* Slide back to first image over 0.5s */
 }
+
+/* For mobile devices */
+@media (max-width: 768px) {
+  .content-wrapper {
+    flex-direction: column;
+    gap: 2rem;
+  }
+}
+
