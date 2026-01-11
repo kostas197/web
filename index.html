@@ -66,7 +66,7 @@ Type help for a list of commands
 	      print('[kostas@personalweb]$ ' + cmd);
         input.value = '';
 	if (cmd === 'help')
-	      print('\nclean --> reload the main page\nfeh photos --> take a look of my public photo album\n\nget avionics.cv --> download my cv\nget sysadmin.cv --> download my cv\n\nemailme MESSAGE ---> (DISABLE FOR NOW)send me a message with your email / phone  details, so I can reply you\ncat projects.roles --> list of latest projects and roles\ncat skills --> list of technologies and tools');
+	      print('\nclean --> reload the main page\nget avionics.cv --> download my cv\nget sysadmin.cv --> download my cv\n\nemailme MESSAGE ---> (DISABLE FOR NOW)send me a message with your email / phone  details, so I can reply you\ncat projects.roles --> list of latest projects and roles\ncat skills --> list of technologies and tools');
         else if (cmd === 'get avionics.cv') {
           print('Redirecting to avionics resume / CV...');
           window.location.href = 'https://docs.google.com/document/d/14Nhu4Zd-quQk4_yj8cH_iUT0aeL862zJfZWmOpK2NZs/edit?usp=sharing';
@@ -80,10 +80,6 @@ Type help for a list of commands
         }
         else if (cmd === 'cat skills') {
           print('\n\nHypervisors: Proxmox, VMware\n\nOS: Linux (Arch, Debian, Rocky) , Windows® / Windows server AD\n\nDatabases: MariaDB, postgreSQL, MongoDB\n\nMonitoring: Zabbix, Grafana\n\nNetworking: DNS, DHCP, NAS, iptables, OpenWRT, VLANs, OpenVPN, Wireguard\n\nDevOps: git, terraform, ansible\n\nCloud: AWS, GCP\n\nMainframe: Basic acknowledge on IBM Z/OS / AIX\n\n');
-        }
-        else if (cmd === 'feh photos') {
-          print('Redirecting to public photos and videos...');
-          window.location.href = 'https://photos.app.goo.gl/Bn1j3AJ5ieZ2pkGi8';
         }
         else if (cmd === 'clean') {
           window.location.href = './index.html';
