@@ -34,7 +34,6 @@ li{
 
 h1{
 	font-size: 1.8rem;
-	margin: 10px;
 }
 
 input{
@@ -45,9 +44,38 @@ input{
 	font-family: monospace;
 	font-size: 18px;
 }
-@media (max-width: 767px) {
-            div[style*="display: flex"] {
-                flex-direction: column;
-                align-items: center;
-            }
-        }
+
+/* --- Simple CSS Carousel --- */
+.simple-carousel {
+  width: 100%;
+  max-width: 300px; /* A fixed viewport for the carousel */
+  margin: 2rem auto;
+  overflow: hidden;   /* Hides the image that is not active */
+  border-radius: 5px;
+}
+
+.carousel-images {
+  display: flex;
+  width: 200%;         /* Container for 2 images */
+  animation: slide 10s infinite; /* 10-second animation loop */
+}
+
+.carousel-images img {
+  width: 50%;         /* Each image takes up half of the 200% container */
+  flex-shrink: 0;     /* Prevents images from shrinking */
+  height: auto;
+  border-radius: 5px;
+}
+
+@keyframes slide {
+  /* State 1: Show first image */
+  0%   { transform: translateX(0%); }
+  45%  { transform: translateX(0%); }   /* Hold on first image for 4.5s */
+
+  /* State 2: Show second image */
+  50%  { transform: translateX(-50%); } /* Slide to second image over 0.5s */
+  95%  { transform: translateX(-50%); } /* Hold on second image for 4.5s */
+
+  /* Back to start for the loop */
+  100% { transform: translateX(0%); }   /* Slide back to first image over 0.5s */
+}
