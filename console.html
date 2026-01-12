@@ -21,14 +21,42 @@
       terminal.textContent += text + "\n";
       terminal.scrollTop = terminal.scrollHeight;
     }
-
+    //App script URL
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzbwclHKM_KxKncB24ROsY7JDoylYIrOWYgm754qa3gbBxqMEsWc-vxghiZsDedensl/exec";
+    
+    async function sendMessage(messageText) {
+      // Prepare the payload
+      const data = {
+        message: messageText
+      };
+      
+      try {
+    //use 'no-cors' or text/plain implicitly to avoid preflight (OPTIONS) errors
+    const response = await fetch(WEB_APP_URL, {
+      method: 'POST',
+      // Important: Do not use 'application/json' in the header to avoid CORS preflight in GAS
+      // GAS is capable of parsing the body string anyway.
+      body: JSON.stringify(data)
+    });
+    
+    if (response.ok) {
+        return true;
+    } else {
+        console.error("Request error");
+        return false;
+    }
+  } catch (error) {
+    console.error("Network or CORS error:", error);
+    return false;
+  }
+}
     input.addEventListener('keydown', async (e) => {
       if (e.key === 'Enter') {
         const cmd = input.value.trim().toLowerCase();
 	      print('[kostas@personalweb]$ ' + cmd);
         input.value = '';
 	if (cmd === 'help')
-	      print('\ncat projects.roles --> list of latest projects and roles\ncat skills --> list of technologies and tools\nclean --> reload the main page\n\nget avionics.cv --> download my cv\nget sysadmin.cv --> download my cv\n\nemailme MESSAGE ---> (DISABLE FOR NOW)send me a message with your email / phone  details, so I can reply you\nwhoami --> little description\n');
+	      print('\ncat projects.roles --> list of latest projects and roles\ncat skills --> list of technologies and tools\nclean --> reload the main page\n\nget avionics.cv --> download my cv\nget sysadmin.cv --> download my cv\n\nsend MESSAGE ---> send me a message with your email / phone  details, so I can reply you\n\nwhoami --> a brief bio\n');
         else if (cmd === 'get avionics.cv') {
           print('Redirecting to avionics resume / CV...');
           window.location.href = 'https://docs.google.com/document/d/1pUjsynKVIQwylDfJ2E4sSUPQ-gX3moRpAvNTf0_zdkw/export?format=pdf';
@@ -51,7 +79,23 @@
         }
         else if (cmd === 'ls') {
 		print('drwxr-xr-x 4 kostas kostas 4096 ene  8 01:46 .\ndrwxr-xr-x 3 kostas kostas 4096 ene  8 00:27 ..\n-rw-r--r-- 2 kostas kostas  427 ene  8 01:41 index.html\ndrwxr-xr-x 2 kostas kostas 4096 ene  8 01:40 projects.roles\ndrwxr-xr-x 2 kostas kostas 4096 ene  8 01:40 skills\n');
-	}
+  }
+        else if (cmd.startsWith('send')) {
+          const msgContent = cmd.replace('send', '').trim();
+          //check for empty msg
+          if (!msgContent) {
+            print("Error: Message cannot be empty.\n");
+          } else {
+            print("Sending message.... Please wait\n");
+            // wait for promise resolution true/false
+            const success = await sendMessage(msgContent);
+            if (success) {
+              print("Message sent! Please do not forget any contact details (email / phone).\nBest regards\n");
+            } else {
+            print("Error: Could not send message. Please try again later.\n");
+        }
+    }
+}
 	else {
 		print('command not found, type help for a list of commands');
 	}
