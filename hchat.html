@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cliente MQTT Web Encriptado y Selector</title>
+    <!-- Cargar MQTT.js desde CDN -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b141a; color: #e9edef; display: flex; flex-direction: column; height: 100vh; padding: 10px; gap: 10px; }
+        
+        #config-panel { background: #202c33; padding: 10px; border-radius: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        input, select, button { padding: 8px 12px; border-radius: 6px; border: none; font-size: 14px; outline: none; }
+        input, select { background: #2a3942; color: #e9edef; flex: 1; min-width: 140px; }
+        button { background: #00a884; color: white; font-weight: bold; cursor: pointer; }
+        button:hover { background: #029374; }
+        button#disconnect-btn { background: #d93838; }
+
+        .config-row { display: flex; gap: 8px; width: 100%; flex-wrap: wrap; }
+
+        #chat-container { flex: 1; overflow-y: auto; background: #111b21; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; border: 1px solid #202c33; }
+        
+        .message { padding: 6px 10px; border-radius: 6px; word-break: break-word; font-size: 13px; line-height: 1.4; background: #202c33; max-width: 80%; }
+        .message.system { color: #8696a0; font-style: italic; align-self: center; }
+        .message.incoming { align-self: flex-start; border-left: 3px solid #00a884; }
+        .message.outgoing { align-self: flex-end; border-left: 3px solid #53bdeb; }
+        .sender { font-weight: bold; color: #53bdeb; margin-bottom: 2px; font-size: 11px; }
+        .time { font-size: 10px; color: #8696a0; text-align: right; margin-top: 2px; }
+
+        #input-container { display: flex; gap: 8px; }
+    </style>
+</head>
+<body>
+
+    <div id="config-panel">
+        <div class="config-row">
+            <!-- Selector de servidores WSS predefinidos -->
+            <select id="broker-select">
+                <option value="wss://broker.hivemq.com:8884/mqtt">HiveMQ (Público WSS)</option>
+                <option value="wss://broker.emqx.io:8084/mqtt">EMQX (Público WSS)</option>
+                <option value="wss://test.mosquitto.org:443/mqtt">Mosquitto Eclipse (Público WSS)</option>
+                <option value="wss://broker.freemqtt.com:8084/mqtt">FreeMQTT (Público WSS)</option>
+                <option value="custom">-- Escribir URL personalizada --</option>
+            </select>
+            <!-- Input para URL personalizada (oculto por defecto) -->
+            <input type="text" id="broker-url-custom" placeholder="wss://tu-servidor:puerto/mqtt" style="display:none;">
+            <input type="text" id="topic-input" placeholder="Topic" value="mi/chat/prueba">
+        </div>
+        <div class="config-row">
+            <input type="text" id="username-input" placeholder="Tu Nombre" value="Usuario1">
+            <input type="password" id="password-input" placeholder="Contraseña compartida">
+            <button id="connect-btn">Conectar</button>
+            <button id="disconnect-btn" style="display:none;">Desconectar</button>
+        </div>
+    </div>
+
+    <div id="chat-container">
+        <div class="message system">Estado: Desconectado. Selecciona un broker y conéctate.</div>
+    </div>
+
+    <div id="input-container">
+        <input type="text" id="message-input" placeholder="Escribe un mensaje..." disabled>
+        <button id="send-btn" disabled>Enviar</button>
+    </div>
+
+    <script>
+        let client = null;
+        let cryptoKey = null;
+        const mySessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+
+        const brokerSelect = document.getElementById('broker-select');
+        const brokerUrlCustom = document.getElementById('broker-url-custom');
+        const topicInput = document.getElementById('topic-input');
+        const usernameInput = document.getElementById('username-input');
+        const passwordInput = document.getElementById('password-input');
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const messageInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const chatContainer = document.getElementById('chat-container');
+
+        // Mostrar u ocultar el input personalizado si el usuario elige "-- Escribir URL personalizada --"
+        brokerSelect.addEventListener('change', () => {
+            if (brokerSelect.value === 'custom') {
+                brokerUrlCustom.style.display = 'block';
+                brokerUrlCustom.focus();
+            } else {
+                brokerUrlCustom.style.display = 'none';
+            }
+        });
+
+        function appendMessage(sender, text, type = 'incoming') {
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            
+            let senderHtml = sender ? `<div class="sender">${escapeHtml(sender)}</div>` : '';
+            div.innerHTML = `${senderHtml}<div>${escapeHtml(text)}</div><div class="time">${timeString}</div>`;
+            chatContainer.appendChild(div);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        async function getCryptoKey(password) {
+            const enc = new TextEncoder();
+            const keyMaterial = await window.crypto.subtle.importKey(
+                "raw",
+                enc.encode(password),
+                { name: "PBKDF2" },
+                false,
+                ["deriveKey"]
+            );
+            const salt = enc.encode("mqtt_chat_salt_fija");
+            return window.crypto.subtle.deriveKey(
+                { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
+                keyMaterial,
+                { name: "AES-GCM", length: 256 },
+                false,
+                ["encrypt", "decrypt"]
+            );
+        }
+
+        async function encryptMessage(text, key) {
+            const enc = new TextEncoder();
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const encoded = enc.encode(text);
+            const ciphertext = await window.crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                encoded
+            );
+            const combined = new Uint8Array(iv.byteLength + ciphertext.byteLength);
+            combined.set(iv, 0);
+            combined.set(new Uint8Array(ciphertext), iv.byteLength);
+            return btoa(String.fromCharCode(...combined));
+        }
+
+        async function decryptMessage(base64Data, key) {
+            try {
+                const combined = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+                const iv = combined.slice(0, 12);
+                const ciphertext = combined.slice(12);
+                const decrypted = await window.crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: iv },
+                    key,
+                    ciphertext
+                );
+                return new TextDecoder().decode(decrypted);
+            } catch (e) {
+                return null;
+            }
+        }
+
+        connectBtn.addEventListener('click', async () => {
+            // Obtener la URL dependiendo de si seleccionó de la lista o eligió custom
+            let url = brokerSelect.value === 'custom' ? brokerUrlCustom.value.trim() : brokerSelect.value;
+            const topic = topicInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!url || !topic || !password) {
+                alert('Introduce una URL válida, un topic y una contraseña compartida.');
+                return;
+            }
+
+            try {
+                cryptoKey = await getCryptoKey(password);
+            } catch (e) {
+                alert('Error al generar la clave criptográfica.');
+                return;
+            }
+
+            appendMessage('', `Conectando a ${url}...`, 'system');
+
+            client = mqtt.connect(url, {
+                clientId: 'mqtt_web_' + Math.random().toString(16).substr(2, 8),
+                clean: true
+            });
+
+            client.on('connect', () => {
+                appendMessage('', '¡Conectado exitosamente!', 'system');
+                connectBtn.style.display = 'none';
+                disconnectBtn.style.display = 'inline-block';
+                brokerSelect.disabled = true;
+                brokerUrlCustom.disabled = true;
+                topicInput.disabled = true;
+                usernameInput.disabled = true;
+                passwordInput.disabled = true;
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+                messageInput.focus();
+
+                client.subscribe(topic, (err) => {
+                    if (!err) {
+                        appendMessage('', `Suscrito al topic: ${topic}`, 'system');
+                    }
+                });
+            });
+
+            client.on('message', async (incomingTopic, payload) => {
+                const decryptedStr = await decryptMessage(payload.toString(), cryptoKey);
+                if (decryptedStr) {
+                    try {
+                        const data = JSON.parse(decryptedStr);
+                        if (data.sessionId === mySessionId) return;
+                        appendMessage(data.sender, data.text, 'incoming');
+                    } catch (e) {
+                        appendMessage('Desconocido', decryptedStr, 'incoming');
+                    }
+                } else {
+                    appendMessage('Sistema', '[Mensaje ignorado: Contraseña incorrecta o ilegible]', 'system');
+                }
+            });
+
+            client.on('error', (err) => {
+                appendMessage('', `Error de conexión: ${err.message}`, 'system');
+                client.end();
+            });
+
+            client.on('close', () => {
+                resetUI();
+                appendMessage('', 'Conexión cerrada.', 'system');
+            });
+        });
+
+        disconnectBtn.addEventListener('click', () => {
+            if (client) client.end();
+        });
+
+        async function sendMessage() {
+            const text = messageInput.value.trim();
+            const topic = topicInput.value.trim();
+            const sender = usernameInput.value.trim() || 'Anónimo';
+
+            if (!text || !client || !client.connected || !cryptoKey) return;
+
+            const payloadObj = { 
+                sessionId: mySessionId,
+                sender: sender, 
+                text: text 
+            };
+            
+            const encryptedPayload = await encryptMessage(JSON.stringify(payloadObj), cryptoKey);
+
+            client.publish(topic, encryptedPayload, { qos: 0 }, (err) => {
+                if (!err) {
+                    appendMessage(sender, text, 'outgoing');
+                    messageInput.value = '';
+                } else {
+                    appendMessage('', 'Error al enviar mensaje', 'system');
+                }
+            });
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        function resetUI() {
+            connectBtn.style.display = 'inline-block';
+            disconnectBtn.style.display = 'none';
+            brokerSelect.disabled = false;
+            brokerUrlCustom.disabled = false;
+            topicInput.disabled = false;
+            usernameInput.disabled = false;
+            passwordInput.disabled = false;
+            messageInput.disabled = true;
+            sendBtn.disabled = true;
+        }
+
+        function escapeHtml(text) {
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+    </script>
+</body>
+</html>
