@@ -39,16 +39,15 @@
             <select id="broker-select">
                 <option value="wss://broker.hivemq.com:8884/mqtt">HiveMQ (Público WSS)</option>
                 <option value="wss://broker.emqx.io:8084/mqtt">EMQX (Público WSS)</option>
-                <option value="wss://test.mosquitto.org:443/mqtt">Mosquitto Eclipse (Público WSS)</option>
-                <option value="wss://broker.freemqtt.com:8084/mqtt">FreeMQTT (Público WSS)</option>
+                <option value="wss://test.mosquitto.org:8081/mqtt">Mosquitto Eclipse (Público WSS)</option>
                 <option value="custom">-- Escribir URL personalizada --</option>
             </select>
             <!-- Input para URL personalizada (oculto por defecto) -->
             <input type="text" id="broker-url-custom" placeholder="wss://tu-servidor:puerto/mqtt" style="display:none;">
-            <input type="text" id="topic-input" placeholder="Topic" value="mi/chat/prueba">
+            <input type="text" id="topic-input" placeholder="Topic" value="kos/volatile/chat">
         </div>
         <div class="config-row">
-            <input type="text" id="username-input" placeholder="Tu Nombre" value="Usuario1">
+            <input type="text" id="username-input" placeholder="Tu Nombre" value="invitado">
             <input type="password" id="password-input" placeholder="Contraseña compartida">
             <button id="connect-btn">Conectar</button>
             <button id="disconnect-btn" style="display:none;">Desconectar</button>
