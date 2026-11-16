@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>kos chat</title>
-    <!-- Cargar MQTT.js desde CDN -->
+    <title>kos chat P2P</title>
+    <!-- Cargar MQTT.js y fflate -->
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://unpkg.com/fflate@0.8.2/umd/index.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b141a; color: #e9edef; display: flex; flex-direction: column; height: 100vh; padding: 10px; gap: 10px; }
@@ -16,10 +17,8 @@
         button { background: #00a884; color: white; font-weight: bold; cursor: pointer; }
         button:hover { background: #029374; }
         button#disconnect-btn { background: #d93838; }
-        button#attach-btn { background: #53bdeb; color: #0b141a; }
-        button#attach-btn:hover { background: #3fa5d3; }
 
-        .config-row { display: flex; gap: 8px; width: 100%; flex-wrap: wrap; }
+        .config-row { display: flex; gap: 8px; width: 100%; flex-wrap: wrap; align-items: center; }
 
         #chat-container { flex: 1; overflow-y: auto; background: #111b21; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; border: 1px solid #202c33; }
         
@@ -32,7 +31,36 @@
         .file-link { display: inline-block; margin-top: 4px; padding: 4px 8px; background: #00a884; color: white; border-radius: 4px; text-decoration: none; font-weight: bold; }
         .file-link:hover { background: #029374; }
 
-        #input-container { display: flex; gap: 8px; }
+        /* Contenedor principal del input con menú flotante */
+        #input-container { display: flex; gap: 8px; align-items: center; position: relative; }
+        #message-input { flex: 1; }
+
+        button#attach-main-btn { background: #53bdeb; color: #0b141a; }
+        button#attach-main-btn:hover { background: #3fa5d3; }
+
+        /* Menú desplegable flotante minimalista */
+        #attach-menu {
+            display: none;
+            position: absolute;
+            bottom: 50px;
+            left: 0;
+            background: #202c33;
+            border: 1px solid #2a3942;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            z-index: 100;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 250px;
+        }
+        #attach-menu.active { display: flex; }
+        .menu-label { font-size: 12px; color: #8696a0; margin-bottom: -4px; }
+        #peer-select { width: 100%; background: #2a3942; color: #e9edef; }
+        .menu-btns { display: flex; gap: 8px; }
+        .menu-btns button { flex: 1; font-size: 13px; }
+        button#attach-file-btn { background: #53bdeb; color: #0b141a; }
+        button#attach-folder-btn { background: #ffb703; color: #0b141a; }
     </style>
 </head>
 <body>
@@ -61,18 +89,38 @@
     </div>
 
     <div id="input-container">
+        <!-- Botón Attach a la izquierda -->
+        <button id="attach-main-btn" disabled>Attach</button>
+
+        <!-- Menú flotante desplegable -->
+        <div id="attach-menu">
+            <div class="menu-label">Enviar a:</div>
+            <select id="peer-select" disabled>
+                <option value="">-- Sin usuarios activos --</option>
+            </select>
+            <div class="menu-label">Seleccionar contenido:</div>
+            <div class="menu-btns">
+                <button id="attach-file-btn">Archivo(s)</button>
+                <button id="attach-folder-btn">Carpeta</button>
+            </div>
+        </div>
+
         <input type="text" id="message-input" placeholder="Escribe un mensaje..." disabled>
+        
+        <!-- Inputs ocultos -->
         <input type="file" id="file-input" style="display:none;" multiple>
-        <button id="attach-btn" disabled>Adjuntar</button>
+        <input type="file" id="folder-input" style="display:none;" webkitdirectory directory>
+
+        <!-- Botón Enviar a la derecha -->
         <button id="send-btn" disabled>Enviar</button>
     </div>
 
     <script>
         let client = null;
         let cryptoKey = null;
-        let peerConnection = null;
-        let dataChannel = null;
         const mySessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+        
+        const activePeers = new Map();
 
         const rtcConfig = {
             iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -87,8 +135,14 @@
         const disconnectBtn = document.getElementById('disconnect-btn');
         const messageInput = document.getElementById('message-input');
         const sendBtn = document.getElementById('send-btn');
-        const attachBtn = document.getElementById('attach-btn');
+        
+        const attachMainBtn = document.getElementById('attach-main-btn');
+        const attachMenu = document.getElementById('attach-menu');
+        const attachFileBtn = document.getElementById('attach-file-btn');
+        const attachFolderBtn = document.getElementById('attach-folder-btn');
         const fileInput = document.getElementById('file-input');
+        const folderInput = document.getElementById('folder-input');
+        const peerSelect = document.getElementById('peer-select');
         const chatContainer = document.getElementById('chat-container');
 
         const savedUsername = localStorage.getItem('mqtt_chat_username');
@@ -105,6 +159,19 @@
             }
         });
 
+        // Mostrar / Ocultar menú flotante Attach
+        attachMainBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            attachMenu.classList.toggle('active');
+        });
+
+        // Cerrar menú si se hace clic fuera de él
+        document.addEventListener('click', (e) => {
+            if (!attachMenu.contains(e.target) && e.target !== attachMainBtn) {
+                attachMenu.classList.remove('active');
+            }
+        });
+
         function appendMessage(sender, text, type = 'incoming') {
             const div = document.createElement('div');
             div.className = `message ${type}`;
@@ -114,7 +181,7 @@
             div.innerHTML = `${senderHtml}<div>${escapeHtml(text)}</div><div class="time">${timeString}</div>`;
             chatContainer.appendChild(div);
             chatContainer.scrollTop = chatContainer.scrollHeight;
-            return div; // Retornar el elemento por si queremos actualizar su texto luego
+            return div;
         }
 
         function appendFileLink(sender, fileName, url, type = 'incoming') {
@@ -125,6 +192,43 @@
             div.innerHTML = `${senderHtml}<div>Archivo recibido: <strong>${escapeHtml(fileName)}</strong><br><a class="file-link" href="${url}" download="${fileName}">Descargar Archivo</a></div><div class="time">${timeString}</div>`;
             chatContainer.appendChild(div);
             chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function registerPeer(sessionId, senderName) {
+            if (!sessionId || sessionId === mySessionId) return;
+            activePeers.set(sessionId, { name: senderName, lastSeen: Date.now() });
+            updatePeerSelect();
+        }
+
+        function updatePeerSelect() {
+            const currentSelected = peerSelect.value;
+            peerSelect.innerHTML = '';
+            
+            if (activePeers.size === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = '-- Sin usuarios activos --';
+                peerSelect.appendChild(opt);
+                peerSelect.disabled = true;
+                return;
+            }
+
+            peerSelect.disabled = false;
+            const defaultOpt = document.createElement('option');
+            defaultOpt.value = '';
+            defaultOpt.textContent = '-- Seleccionar destinatario --';
+            peerSelect.appendChild(defaultOpt);
+
+            for (let [sessionId, peer] of activePeers.entries()) {
+                const opt = document.createElement('option');
+                opt.value = sessionId;
+                opt.textContent = peer.name;
+                peerSelect.appendChild(opt);
+            }
+
+            if (activePeers.has(currentSelected)) {
+                peerSelect.value = currentSelected;
+            }
         }
 
         async function getCryptoKey(password) {
@@ -183,84 +287,12 @@
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
-        // --- WebRTC Setup & Signaling ---
-        function setupPeerConnection() {
-            if (peerConnection) return;
-            peerConnection = new RTCPeerConnection(rtcConfig);
-
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    sendEncryptedSignal({
-                        type: 'webrtc_candidate',
-                        candidate: event.candidate
-                    });
-                }
-            };
-
-            peerConnection.ondatachannel = (event) => {
-                dataChannel = event.channel;
-                setupDataChannel();
-            };
-        }
-
-        function setupDataChannel() {
-            dataChannel.binaryType = 'arraybuffer';
-            let receivedBuffers = [];
-            let receivedSize = 0;
-            let fileMeta = null;
-            let progressMsgDiv = null;
-
-            dataChannel.onopen = () => {
-                appendMessage('Sistema', 'Túnel P2P establecido correctamente.', 'system');
-            };
-
-            dataChannel.onmessage = async (event) => {
-                if (typeof event.data === 'string') {
-                    const msg = JSON.parse(event.data);
-                    if (msg.type === 'file-meta') {
-                        fileMeta = msg;
-                        receivedBuffers = [];
-                        receivedSize = 0;
-                        progressMsgDiv = appendMessage('Sistema', `Recibiendo ${fileMeta.name}: 0%`, 'system');
-                    }
-                } else {
-                    receivedBuffers.push(event.data);
-                    receivedSize += event.data.byteLength;
-
-                    if (fileMeta) {
-                        const percent = Math.floor((receivedSize / fileMeta.size) * 100);
-                        if (progressMsgDiv) {
-                            progressMsgDiv.querySelector('div:nth-child(2)').textContent = `Recibiendo ${fileMeta.name}: ${percent}% (${(receivedSize / (1024*1024)).toFixed(1)} / ${(fileMeta.size / (1024*1024)).toFixed(1)} MB)`;
-                        }
-                    }
-
-                    if (receivedSize >= fileMeta.size) {
-                        if (progressMsgDiv) {
-                            progressMsgDiv.querySelector('div:nth-child(2)').textContent = `Verificando integridad SHA-256 de ${fileMeta.name}...`;
-                        }
-                        const completeBlob = new Blob(receivedBuffers);
-                        const arrayBuffer = await completeBlob.arrayBuffer();
-                        const calculatedHash = await calculateHash(arrayBuffer);
-
-                        if (calculatedHash === fileMeta.hash) {
-                            if (progressMsgDiv) progressMsgDiv.remove();
-                            const url = URL.createObjectURL(completeBlob);
-                            appendFileLink(fileMeta.sender, fileMeta.name, url, 'incoming');
-                        } else {
-                            if (progressMsgDiv) {
-                                progressMsgDiv.querySelector('div:nth-child(2)').textContent = `¡Error de integridad! El hash SHA-256 no coincide en ${fileMeta.name}.`;
-                            }
-                        }
-                    }
-                }
-            };
-        }
-
-        async function sendEncryptedSignal(signalObj) {
+        async function sendEncryptedSignal(targetSessionId, signalObj) {
             const topic = topicInput.value.trim();
             const sender = usernameInput.value.trim() || 'Anónimo';
             const payloadObj = {
                 sessionId: mySessionId,
+                targetSessionId: targetSessionId,
                 sender: sender,
                 type: 'signal',
                 signal: signalObj
@@ -297,7 +329,7 @@
             });
 
             client.on('connect', () => {
-                appendMessage('', '¡Conectado exitosamente!', 'system');
+                appendMessage('', '¡Conectado exitosamente al broker MQTT!', 'system');
                 connectBtn.style.display = 'none';
                 disconnectBtn.style.display = 'inline-block';
                 brokerSelect.disabled = true;
@@ -307,7 +339,7 @@
                 passwordInput.disabled = true;
                 messageInput.disabled = false;
                 sendBtn.disabled = false;
-                attachBtn.disabled = false;
+                attachMainBtn.disabled = false;
                 messageInput.focus();
 
                 client.subscribe(topic, (err) => {
@@ -324,23 +356,13 @@
                         const data = JSON.parse(decryptedStr);
                         if (data.sessionId === mySessionId) return;
 
+                        registerPeer(data.sessionId, data.sender);
+
                         if (data.type === 'chat') {
                             appendMessage(data.sender, data.text, 'incoming');
                         } else if (data.type === 'signal') {
-                            setupPeerConnection();
-                            const sig = data.signal;
-                            if (sig.type === 'webrtc_offer') {
-                                await peerConnection.setRemoteDescription(new RTCSessionDescription(sig.offer));
-                                const answer = await peerConnection.createAnswer();
-                                await peerConnection.setLocalDescription(answer);
-                                sendEncryptedSignal({ type: 'webrtc_answer', answer: answer });
-                            } else if (sig.type === 'webrtc_answer') {
-                                await peerConnection.setRemoteDescription(new RTCSessionDescription(sig.answer));
-                            } else if (sig.type === 'webrtc_candidate') {
-                                try {
-                                    await peerConnection.addIceCandidate(new RTCIceCandidate(sig.candidate));
-                                } catch (e) {}
-                            }
+                            if (data.targetSessionId && data.targetSessionId !== mySessionId) return;
+                            handleIncomingSignal(data.sessionId, data.sender, data.signal);
                         }
                     } catch (e) {
                         appendMessage('Desconocido', decryptedStr, 'incoming');
@@ -363,7 +385,6 @@
 
         disconnectBtn.addEventListener('click', () => {
             if (client) client.end();
-            if (peerConnection) { peerConnection.close(); peerConnection = null; }
         });
 
         async function sendMessage() {
@@ -392,78 +413,303 @@
             });
         }
 
-        // --- Manejo de Envío con Porcentaje y Backpressure ---
-        attachBtn.addEventListener('click', () => fileInput.click());
+        const incomingConnections = new Map();
+
+        function handleIncomingSignal(senderSessionId, senderName, sig) {
+            let pcConn = incomingConnections.get(senderSessionId);
+
+            if (!pcConn) {
+                const pc = new RTCPeerConnection(rtcConfig);
+                const connObj = { pc: pc, channel: null };
+                incomingConnections.set(senderSessionId, connObj);
+
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        sendEncryptedSignal(senderSessionId, {
+                            type: 'webrtc_candidate',
+                            candidate: event.candidate
+                        });
+                    }
+                };
+
+                pc.ondatachannel = (event) => {
+                    const channel = event.channel;
+                    connObj.channel = channel;
+                    setupReceiverChannel(senderSessionId, channel);
+                };
+
+                pcConn = connObj;
+            }
+
+            const pc = pcConn.pc;
+
+            if (sig.type === 'webrtc_offer') {
+                pc.setRemoteDescription(new RTCSessionDescription(sig.offer))
+                    .then(() => pc.createAnswer())
+                    .then(answer => pc.setLocalDescription(answer))
+                    .then(() => {
+                        sendEncryptedSignal(senderSessionId, { type: 'webrtc_answer', answer: pc.localDescription });
+                    });
+            } else if (sig.type === 'webrtc_candidate') {
+                pc.addIceCandidate(new RTCIceCandidate(sig.candidate)).catch(() => {});
+            }
+        }
+
+        function setupReceiverChannel(senderSessionId, channel) {
+            channel.binaryType = 'arraybuffer';
+            let receivedBuffers = [];
+            let receivedSize = 0;
+            let fileMeta = null;
+            let progressMsgDiv = null;
+
+            channel.onmessage = async (event) => {
+                if (typeof event.data === 'string') {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'file-meta') {
+                        fileMeta = msg;
+                        receivedBuffers = [];
+                        receivedSize = 0;
+                        progressMsgDiv = appendMessage('Sistema', `Recibiendo ${fileMeta.name}: 0%`, 'system');
+                    }
+                } else {
+                    receivedBuffers.push(event.data);
+                    receivedSize += event.data.byteLength;
+
+                    if (fileMeta) {
+                        const percent = Math.floor((receivedSize / fileMeta.size) * 100);
+                        if (progressMsgDiv) {
+                            progressMsgDiv.querySelector('div:nth-child(2)').textContent = `Recibiendo ${fileMeta.name}: ${percent}% (${(receivedSize / (1024*1024)).toFixed(1)} / ${(fileMeta.size / (1024*1024)).toFixed(1)} MB)`;
+                        }
+                    }
+
+                    if (receivedSize >= fileMeta.size) {
+                        if (progressMsgDiv) {
+                            progressMsgDiv.querySelector('div:nth-child(2)').textContent = `Verificando integridad SHA-256 de ${fileMeta.name}...`;
+                        }
+                        
+                        const completeBlob = new Blob(receivedBuffers);
+                        const arrayBuffer = await completeBlob.arrayBuffer();
+                        const calculatedHash = await calculateHash(arrayBuffer);
+
+                        if (calculatedHash === fileMeta.hash) {
+                            if (progressMsgDiv) progressMsgDiv.remove();
+                            const url = URL.createObjectURL(completeBlob);
+                            appendFileLink(fileMeta.sender, fileMeta.name, url, 'incoming');
+
+                            if (channel.readyState === 'open') {
+                                channel.send(JSON.stringify({ type: 'file-ack' }));
+                            }
+                        } else {
+                            if (progressMsgDiv) {
+                                progressMsgDiv.querySelector('div:nth-child(2)').textContent = `❌ ¡Error de integridad! El hash SHA-256 no coincide en ${fileMeta.name}.`;
+                            }
+                        }
+
+                        setTimeout(() => {
+                            const conn = incomingConnections.get(senderSessionId);
+                            if (conn) {
+                                conn.pc.close();
+                                incomingConnections.delete(senderSessionId);
+                            }
+                        }, 1000);
+                    }
+                }
+            };
+        }
+
+        async function sendFileToPeer(targetSessionId, fileBlob, fileName) {
+            const pc = new RTCPeerConnection(rtcConfig);
+            const channel = pc.createDataChannel('file-transfer', { ordered: true });
+            channel.binaryType = 'arraybuffer';
+
+            let ackReceived = false;
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    sendEncryptedSignal(targetSessionId, {
+                        type: 'webrtc_candidate',
+                        candidate: event.candidate
+                    });
+                }
+            };
+
+            const openPromise = new Promise((resolve, reject) => {
+                channel.onopen = () => resolve();
+                setTimeout(() => reject(new Error('Timeout abriendo el túnel P2P')), 15000);
+            });
+
+            const ackPromise = new Promise((resolve) => {
+                channel.onmessage = (event) => {
+                    if (typeof event.data === 'string') {
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === 'file-ack') resolve(true);
+                    }
+                };
+            });
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            sendEncryptedSignal(targetSessionId, { type: 'webrtc_offer', offer: offer });
+
+            const answerHandlerPromise = new Promise((resolve) => {
+                client.on('message', async (topic, payload) => {
+                    const decrypted = await decryptMessage(payload.toString(), cryptoKey);
+                    if (decrypted) {
+                        try {
+                            const data = JSON.parse(decrypted);
+                            if (data.sessionId === targetSessionId && data.type === 'signal') {
+                                const sig = data.signal;
+                                if (sig.type === 'webrtc_answer' && pc.signalingState === 'have-local-offer') {
+                                    await pc.setRemoteDescription(new RTCSessionDescription(sig.answer));
+                                    resolve();
+                                } else if (sig.type === 'webrtc_candidate') {
+                                    await pc.addIceCandidate(new RTCIceCandidate(sig.candidate)).catch(()=>{});
+                                }
+                            }
+                        } catch(e){}
+                    }
+                });
+            });
+
+            appendMessage('Sistema', `Abriendo túnel P2P con ${activePeers.get(targetSessionId)?.name || 'usuario'}...`, 'system');
+
+            try {
+                await Promise.race([answerHandlerPromise, openPromise]);
+                await openPromise;
+            } catch (e) {
+                appendMessage('Sistema', `❌ No se pudo abrir el túnel P2P con el usuario seleccionado.`, 'system');
+                pc.close();
+                return;
+            }
+
+            appendMessage('Sistema', `Calculando hash SHA-256 de ${fileName}...`, 'system');
+            const fullArrayBuffer = await fileBlob.arrayBuffer();
+            const hash = await calculateHash(fullArrayBuffer);
+
+            const sender = usernameInput.value.trim() || 'Anónimo';
+            channel.send(JSON.stringify({
+                type: 'file-meta',
+                name: fileName,
+                size: fileBlob.size,
+                hash: hash,
+                sender: sender
+            }));
+
+            const progressMsg = appendMessage('Sistema', `Enviando ${fileName}: 0%`, 'system');
+
+            const CHUNK_SIZE = 256 * 1024;
+            let offset = 0;
+
+            while (offset < fileBlob.size) {
+                if (channel.readyState !== 'open' || pc.connectionState === 'failed') {
+                    progressMsg.remove();
+                    appendMessage('Sistema', `❌ Error: La conexión se interrumpió durante el envío de ${fileName}.`, 'system');
+                    pc.close();
+                    return;
+                }
+
+                if (channel.bufferedAmount > 4 * 1024 * 1024) {
+                    await new Promise(resolve => {
+                        channel.bufferedAmountLowThreshold = 1 * 1024 * 1024;
+                        channel.onbufferedamountlow = () => {
+                            channel.onbufferedamountlow = null;
+                            resolve();
+                        };
+                        setTimeout(resolve, 50);
+                    });
+                }
+
+                const slice = fileBlob.slice(offset, offset + CHUNK_SIZE);
+                const chunk = await slice.arrayBuffer();
+                channel.send(chunk);
+                offset += chunk.byteLength;
+
+                const percent = Math.floor((offset / fileBlob.size) * 100);
+                progressMsg.querySelector('div:nth-child(2)').textContent = `Enviando ${fileName}: ${percent}% (${(offset / (1024*1024)).toFixed(1)} / ${(fileBlob.size / (1024*1024)).toFixed(1)} MB)`;
+            }
+
+            progressMsg.querySelector('div:nth-child(2)').textContent = `Esperando confirmación (ACK) de recepción de ${fileName}...`;
+
+            const ackResult = await Promise.race([
+                ackPromise,
+                new Promise(resolve => setTimeout(() => resolve(false), 45000))
+            ]);
+
+            progressMsg.remove();
+
+            if (ackResult) {
+                appendMessage('Sistema', `✅ ¡Archivo entregado y verificado correctamente: ${fileName}!`, 'system');
+            } else {
+                appendMessage('Sistema', `⚠️ Se enviaron los datos de ${fileName}, pero no se recibió confirmación final (ACK).`, 'system');
+            }
+
+            pc.close();
+        }
+
+        // --- Acciones de menú Attach ---
+        attachFileBtn.addEventListener('click', () => {
+            const targetSessionId = peerSelect.value;
+            if (!targetSessionId) {
+                alert('Por favor, selecciona un usuario de la lista en el menú Attach primero.');
+                return;
+            }
+            attachMenu.classList.remove('active');
+            fileInput.click();
+        });
 
         fileInput.addEventListener('change', async () => {
             const files = fileInput.files;
-            if (!files.length) return;
-
-            setupPeerConnection();
-            if (!dataChannel || dataChannel.readyState !== 'open') {
-                dataChannel = peerConnection.createDataChannel('file-transfer', { ordered: true });
-                setupDataChannel();
-                
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-                sendEncryptedSignal({ type: 'webrtc_offer', offer: offer });
-                
-                appendMessage('Sistema', 'Iniciando conexión P2P con el par...', 'system');
-                await new Promise((resolve) => {
-                    const checkInterval = setInterval(() => {
-                        if (dataChannel.readyState === 'open') {
-                            clearInterval(checkInterval);
-                            resolve();
-                        }
-                    }, 100);
-                });
-            }
+            const targetSessionId = peerSelect.value;
+            if (!files.length || !targetSessionId) return;
 
             for (let file of files) {
-                const calcMsg = appendMessage('Sistema', `Calculando hash SHA-256 de ${file.name}...`, 'system');
-                const fullArrayBuffer = await file.arrayBuffer();
-                const hash = await calculateHash(fullArrayBuffer);
-                calcMsg.remove();
-
-                const sender = usernameInput.value.trim() || 'Anónimo';
-                dataChannel.send(JSON.stringify({
-                    type: 'file-meta',
-                    name: file.name,
-                    size: file.size,
-                    hash: hash,
-                    sender: sender
-                }));
-
-                const progressMsg = appendMessage('Sistema', `Enviando ${file.name}: 0%`, 'system');
-
-                const CHUNK_SIZE = 256 * 1024; // 256 KB por bloque
-                let offset = 0;
-
-                while (offset < file.size) {
-                    if (dataChannel.bufferedAmount > 1024 * 1024) {
-                        await new Promise(resolve => {
-                            dataChannel.bufferedAmountLowThreshold = 512 * 1024;
-                            dataChannel.onbufferedamountlow = () => {
-                                dataChannel.onbufferedamountlow = null;
-                                resolve();
-                            };
-                            setTimeout(resolve, 50);
-                        });
-                    }
-
-                    const slice = file.slice(offset, offset + CHUNK_SIZE);
-                    const chunk = await slice.arrayBuffer();
-                    dataChannel.send(chunk);
-                    offset += chunk.byteLength;
-
-                    const percent = Math.floor((offset / file.size) * 100);
-                    progressMsg.querySelector('div:nth-child(2)').textContent = `Enviando ${file.name}: ${percent}% (${(offset / (1024*1024)).toFixed(1)} / ${(file.size / (1024*1024)).toFixed(1)} MB)`;
-                }
-
-                progressMsg.remove();
-                appendMessage('Sistema', `¡Archivo enviado con éxito: ${file.name}!`, 'system');
+                await sendFileToPeer(targetSessionId, file, file.name);
             }
             fileInput.value = '';
+        });
+
+        attachFolderBtn.addEventListener('click', () => {
+            const targetSessionId = peerSelect.value;
+            if (!targetSessionId) {
+                alert('Por favor, selecciona un usuario de la lista en el menú Attach primero.');
+                return;
+            }
+            attachMenu.classList.remove('active');
+            folderInput.click();
+        });
+
+        folderInput.addEventListener('change', async () => {
+            const files = folderInput.files;
+            const targetSessionId = peerSelect.value;
+            if (!files.length || !targetSessionId) return;
+
+            appendMessage('Sistema', 'Comprimiendo carpeta en formato .zip...', 'system');
+            
+            const zipFiles = {};
+            let folderName = 'carpeta';
+
+            for (let file of files) {
+                const relPath = file.webkitRelativePath || file.name;
+                const pathParts = relPath.split('/');
+                if (pathParts.length > 0) folderName = pathParts[0];
+
+                const buffer = await file.arrayBuffer();
+                zipFiles[relPath] = new Uint8Array(buffer);
+            }
+
+            fflate.zip(zipFiles, async (err, zippedData) => {
+                if (err) {
+                    appendMessage('Sistema', 'Error al comprimir la carpeta.', 'system');
+                    return;
+                }
+                const zipBlob = new Blob([zippedData], { type: 'application/zip' });
+                const zipName = `${folderName}.zip`;
+                
+                appendMessage('Sistema', `Carpeta comprimida (${(zipBlob.size / (1024*1024)).toFixed(1)} MB). Abriendo túnel...`, 'system');
+                await sendFileToPeer(targetSessionId, zipBlob, zipName);
+            });
+
+            folderInput.value = '';
         });
 
         sendBtn.addEventListener('click', sendMessage);
@@ -481,7 +727,11 @@
             passwordInput.disabled = false;
             messageInput.disabled = true;
             sendBtn.disabled = true;
-            attachBtn.disabled = true;
+            attachMainBtn.disabled = true;
+            peerSelect.disabled = true;
+            activePeers.clear();
+            updatePeerSelect();
+            attachMenu.classList.remove('active');
         }
 
         function escapeHtml(text) {
