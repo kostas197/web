@@ -16,6 +16,8 @@
         button { background: #00a884; color: white; font-weight: bold; cursor: pointer; }
         button:hover { background: #029374; }
         button#disconnect-btn { background: #d93838; }
+        button#attach-btn { background: #53bdeb; color: #0b141a; }
+        button#attach-btn:hover { background: #3fa5d3; }
 
         .config-row { display: flex; gap: 8px; width: 100%; flex-wrap: wrap; }
 
@@ -27,6 +29,8 @@
         .message.outgoing { align-self: flex-end; border-left: 3px solid #53bdeb; }
         .sender { font-weight: bold; color: #53bdeb; margin-bottom: 2px; font-size: 11px; }
         .time { font-size: 10px; color: #8696a0; text-align: right; margin-top: 2px; }
+        .file-link { display: inline-block; margin-top: 4px; padding: 4px 8px; background: #00a884; color: white; border-radius: 4px; text-decoration: none; font-weight: bold; }
+        .file-link:hover { background: #029374; }
 
         #input-container { display: flex; gap: 8px; }
     </style>
@@ -35,19 +39,17 @@
 
     <div id="config-panel">
         <div class="config-row">
-            <!-- Selector de servidores WSS predefinidos -->
             <select id="broker-select">
                 <option value="wss://broker.hivemq.com:8884/mqtt">HiveMQ (Público WSS)</option>
                 <option value="wss://broker.emqx.io:8084/mqtt">EMQX (Público WSS)</option>
                 <option value="wss://test.mosquitto.org:8081/mqtt">Mosquitto Eclipse (Público WSS)</option>
                 <option value="custom">-- Escribir URL personalizada --</option>
             </select>
-            <!-- Input para URL personalizada (oculto por defecto) -->
             <input type="text" id="broker-url-custom" placeholder="wss://tu-servidor:puerto/mqtt" style="display:none;">
             <input type="text" id="topic-input" placeholder="Topic" value="kos/volatile/chat">
         </div>
         <div class="config-row">
-	    <input type="text" id="username-input" placeholder="Tu Nombre"> 
+            <input type="text" id="username-input" placeholder="Tu Nombre"> 
             <input type="password" id="password-input" placeholder="Contraseña compartida">
             <button id="connect-btn">Conectar</button>
             <button id="disconnect-btn" style="display:none;">Desconectar</button>
@@ -60,13 +62,21 @@
 
     <div id="input-container">
         <input type="text" id="message-input" placeholder="Escribe un mensaje..." disabled>
+        <input type="file" id="file-input" style="display:none;" multiple>
+        <button id="attach-btn" disabled>Adjuntar</button>
         <button id="send-btn" disabled>Enviar</button>
     </div>
 
     <script>
         let client = null;
         let cryptoKey = null;
+        let peerConnection = null;
+        let dataChannel = null;
         const mySessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+
+        const rtcConfig = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
 
         const brokerSelect = document.getElementById('broker-select');
         const brokerUrlCustom = document.getElementById('broker-url-custom');
@@ -77,16 +87,15 @@
         const disconnectBtn = document.getElementById('disconnect-btn');
         const messageInput = document.getElementById('message-input');
         const sendBtn = document.getElementById('send-btn');
+        const attachBtn = document.getElementById('attach-btn');
+        const fileInput = document.getElementById('file-input');
         const chatContainer = document.getElementById('chat-container');
 
-	// --- PERSISTENCIA DE USUARIO ---
-        // Al cargar la página, recuperar el nombre guardado previamente si existe
         const savedUsername = localStorage.getItem('mqtt_chat_username');
-	if (savedUsername) {
-		usernameInput.value = savedUsername;
-         }
+        if (savedUsername) {
+            usernameInput.value = savedUsername;
+        }
 
-        // Mostrar u ocultar el input personalizado si el usuario elige "-- Escribir URL personalizada --"
         brokerSelect.addEventListener('change', () => {
             if (brokerSelect.value === 'custom') {
                 brokerUrlCustom.style.display = 'block';
@@ -103,6 +112,17 @@
             
             let senderHtml = sender ? `<div class="sender">${escapeHtml(sender)}</div>` : '';
             div.innerHTML = `${senderHtml}<div>${escapeHtml(text)}</div><div class="time">${timeString}</div>`;
+            chatContainer.appendChild(div);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            return div; // Retornar el elemento por si queremos actualizar su texto luego
+        }
+
+        function appendFileLink(sender, fileName, url, type = 'incoming') {
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            let senderHtml = sender ? `<div class="sender">${escapeHtml(sender)}</div>` : '';
+            div.innerHTML = `${senderHtml}<div>Archivo recibido: <strong>${escapeHtml(fileName)}</strong><br><a class="file-link" href="${url}" download="${fileName}">Descargar Archivo</a></div><div class="time">${timeString}</div>`;
             chatContainer.appendChild(div);
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
@@ -157,21 +177,110 @@
             }
         }
 
+        async function calculateHash(arrayBuffer) {
+            const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // --- WebRTC Setup & Signaling ---
+        function setupPeerConnection() {
+            if (peerConnection) return;
+            peerConnection = new RTCPeerConnection(rtcConfig);
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    sendEncryptedSignal({
+                        type: 'webrtc_candidate',
+                        candidate: event.candidate
+                    });
+                }
+            };
+
+            peerConnection.ondatachannel = (event) => {
+                dataChannel = event.channel;
+                setupDataChannel();
+            };
+        }
+
+        function setupDataChannel() {
+            dataChannel.binaryType = 'arraybuffer';
+            let receivedBuffers = [];
+            let receivedSize = 0;
+            let fileMeta = null;
+            let progressMsgDiv = null;
+
+            dataChannel.onopen = () => {
+                appendMessage('Sistema', 'Túnel P2P establecido correctamente.', 'system');
+            };
+
+            dataChannel.onmessage = async (event) => {
+                if (typeof event.data === 'string') {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'file-meta') {
+                        fileMeta = msg;
+                        receivedBuffers = [];
+                        receivedSize = 0;
+                        progressMsgDiv = appendMessage('Sistema', `Recibiendo ${fileMeta.name}: 0%`, 'system');
+                    }
+                } else {
+                    receivedBuffers.push(event.data);
+                    receivedSize += event.data.byteLength;
+
+                    if (fileMeta) {
+                        const percent = Math.floor((receivedSize / fileMeta.size) * 100);
+                        if (progressMsgDiv) {
+                            progressMsgDiv.querySelector('div:nth-child(2)').textContent = `Recibiendo ${fileMeta.name}: ${percent}% (${(receivedSize / (1024*1024)).toFixed(1)} / ${(fileMeta.size / (1024*1024)).toFixed(1)} MB)`;
+                        }
+                    }
+
+                    if (receivedSize >= fileMeta.size) {
+                        if (progressMsgDiv) {
+                            progressMsgDiv.querySelector('div:nth-child(2)').textContent = `Verificando integridad SHA-256 de ${fileMeta.name}...`;
+                        }
+                        const completeBlob = new Blob(receivedBuffers);
+                        const arrayBuffer = await completeBlob.arrayBuffer();
+                        const calculatedHash = await calculateHash(arrayBuffer);
+
+                        if (calculatedHash === fileMeta.hash) {
+                            if (progressMsgDiv) progressMsgDiv.remove();
+                            const url = URL.createObjectURL(completeBlob);
+                            appendFileLink(fileMeta.sender, fileMeta.name, url, 'incoming');
+                        } else {
+                            if (progressMsgDiv) {
+                                progressMsgDiv.querySelector('div:nth-child(2)').textContent = `¡Error de integridad! El hash SHA-256 no coincide en ${fileMeta.name}.`;
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        async function sendEncryptedSignal(signalObj) {
+            const topic = topicInput.value.trim();
+            const sender = usernameInput.value.trim() || 'Anónimo';
+            const payloadObj = {
+                sessionId: mySessionId,
+                sender: sender,
+                type: 'signal',
+                signal: signalObj
+            };
+            const encrypted = await encryptMessage(JSON.stringify(payloadObj), cryptoKey);
+            client.publish(topic, encrypted, { qos: 0 });
+        }
+
         connectBtn.addEventListener('click', async () => {
-            // Obtener la URL dependiendo de si seleccionó de la lista o eligió custom
             let url = brokerSelect.value === 'custom' ? brokerUrlCustom.value.trim() : brokerSelect.value;
             const topic = topicInput.value.trim();
-	    const username = usernameInput.value.trim() || 'Anónimo';
+            const username = usernameInput.value.trim() || 'Anónimo';
             const password = passwordInput.value;
 
             if (!url || !topic || !password) {
                 alert('Introduce una URL válida, un topic y una contraseña compartida.');
                 return;
             }
-	    
-	    // Guardar el nombre de usuario en el navegador al momento de conectar
-	    localStorage.setItem('mqtt_chat_username', username);
-	    
+
+            localStorage.setItem('mqtt_chat_username', username);
 
             try {
                 cryptoKey = await getCryptoKey(password);
@@ -198,6 +307,7 @@
                 passwordInput.disabled = true;
                 messageInput.disabled = false;
                 sendBtn.disabled = false;
+                attachBtn.disabled = false;
                 messageInput.focus();
 
                 client.subscribe(topic, (err) => {
@@ -213,7 +323,25 @@
                     try {
                         const data = JSON.parse(decryptedStr);
                         if (data.sessionId === mySessionId) return;
-                        appendMessage(data.sender, data.text, 'incoming');
+
+                        if (data.type === 'chat') {
+                            appendMessage(data.sender, data.text, 'incoming');
+                        } else if (data.type === 'signal') {
+                            setupPeerConnection();
+                            const sig = data.signal;
+                            if (sig.type === 'webrtc_offer') {
+                                await peerConnection.setRemoteDescription(new RTCSessionDescription(sig.offer));
+                                const answer = await peerConnection.createAnswer();
+                                await peerConnection.setLocalDescription(answer);
+                                sendEncryptedSignal({ type: 'webrtc_answer', answer: answer });
+                            } else if (sig.type === 'webrtc_answer') {
+                                await peerConnection.setRemoteDescription(new RTCSessionDescription(sig.answer));
+                            } else if (sig.type === 'webrtc_candidate') {
+                                try {
+                                    await peerConnection.addIceCandidate(new RTCIceCandidate(sig.candidate));
+                                } catch (e) {}
+                            }
+                        }
                     } catch (e) {
                         appendMessage('Desconocido', decryptedStr, 'incoming');
                     }
@@ -235,6 +363,7 @@
 
         disconnectBtn.addEventListener('click', () => {
             if (client) client.end();
+            if (peerConnection) { peerConnection.close(); peerConnection = null; }
         });
 
         async function sendMessage() {
@@ -247,6 +376,7 @@
             const payloadObj = { 
                 sessionId: mySessionId,
                 sender: sender, 
+                type: 'chat',
                 text: text 
             };
             
@@ -261,6 +391,80 @@
                 }
             });
         }
+
+        // --- Manejo de Envío con Porcentaje y Backpressure ---
+        attachBtn.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', async () => {
+            const files = fileInput.files;
+            if (!files.length) return;
+
+            setupPeerConnection();
+            if (!dataChannel || dataChannel.readyState !== 'open') {
+                dataChannel = peerConnection.createDataChannel('file-transfer', { ordered: true });
+                setupDataChannel();
+                
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                sendEncryptedSignal({ type: 'webrtc_offer', offer: offer });
+                
+                appendMessage('Sistema', 'Iniciando conexión P2P con el par...', 'system');
+                await new Promise((resolve) => {
+                    const checkInterval = setInterval(() => {
+                        if (dataChannel.readyState === 'open') {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 100);
+                });
+            }
+
+            for (let file of files) {
+                const calcMsg = appendMessage('Sistema', `Calculando hash SHA-256 de ${file.name}...`, 'system');
+                const fullArrayBuffer = await file.arrayBuffer();
+                const hash = await calculateHash(fullArrayBuffer);
+                calcMsg.remove();
+
+                const sender = usernameInput.value.trim() || 'Anónimo';
+                dataChannel.send(JSON.stringify({
+                    type: 'file-meta',
+                    name: file.name,
+                    size: file.size,
+                    hash: hash,
+                    sender: sender
+                }));
+
+                const progressMsg = appendMessage('Sistema', `Enviando ${file.name}: 0%`, 'system');
+
+                const CHUNK_SIZE = 256 * 1024; // 256 KB por bloque
+                let offset = 0;
+
+                while (offset < file.size) {
+                    if (dataChannel.bufferedAmount > 1024 * 1024) {
+                        await new Promise(resolve => {
+                            dataChannel.bufferedAmountLowThreshold = 512 * 1024;
+                            dataChannel.onbufferedamountlow = () => {
+                                dataChannel.onbufferedamountlow = null;
+                                resolve();
+                            };
+                            setTimeout(resolve, 50);
+                        });
+                    }
+
+                    const slice = file.slice(offset, offset + CHUNK_SIZE);
+                    const chunk = await slice.arrayBuffer();
+                    dataChannel.send(chunk);
+                    offset += chunk.byteLength;
+
+                    const percent = Math.floor((offset / file.size) * 100);
+                    progressMsg.querySelector('div:nth-child(2)').textContent = `Enviando ${file.name}: ${percent}% (${(offset / (1024*1024)).toFixed(1)} / ${(file.size / (1024*1024)).toFixed(1)} MB)`;
+                }
+
+                progressMsg.remove();
+                appendMessage('Sistema', `¡Archivo enviado con éxito: ${file.name}!`, 'system');
+            }
+            fileInput.value = '';
+        });
 
         sendBtn.addEventListener('click', sendMessage);
         messageInput.addEventListener('keypress', (e) => {
@@ -277,6 +481,7 @@
             passwordInput.disabled = false;
             messageInput.disabled = true;
             sendBtn.disabled = true;
+            attachBtn.disabled = true;
         }
 
         function escapeHtml(text) {
