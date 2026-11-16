@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cliente MQTT Web Encriptado y Selector</title>
+    <title>kos chat</title>
     <!-- Cargar MQTT.js desde CDN -->
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
@@ -47,7 +47,7 @@
             <input type="text" id="topic-input" placeholder="Topic" value="kos/volatile/chat">
         </div>
         <div class="config-row">
-            <input type="text" id="username-input" placeholder="Tu Nombre" value="invitado">
+	    <input type="text" id="username-input" placeholder="Tu Nombre"> 
             <input type="password" id="password-input" placeholder="Contraseña compartida">
             <button id="connect-btn">Conectar</button>
             <button id="disconnect-btn" style="display:none;">Desconectar</button>
@@ -78,6 +78,13 @@
         const messageInput = document.getElementById('message-input');
         const sendBtn = document.getElementById('send-btn');
         const chatContainer = document.getElementById('chat-container');
+
+	// --- PERSISTENCIA DE USUARIO ---
+        // Al cargar la página, recuperar el nombre guardado previamente si existe
+        const savedUsername = localStorage.getItem('mqtt_chat_username');
+	if (savedUsername) {
+		usernameInput.value = savedUsername;
+         }
 
         // Mostrar u ocultar el input personalizado si el usuario elige "-- Escribir URL personalizada --"
         brokerSelect.addEventListener('change', () => {
@@ -154,12 +161,17 @@
             // Obtener la URL dependiendo de si seleccionó de la lista o eligió custom
             let url = brokerSelect.value === 'custom' ? brokerUrlCustom.value.trim() : brokerSelect.value;
             const topic = topicInput.value.trim();
+	    const username = usernameInput.value.trim() || 'Anónimo';
             const password = passwordInput.value;
 
             if (!url || !topic || !password) {
                 alert('Introduce una URL válida, un topic y una contraseña compartida.');
                 return;
             }
+	    
+	    // Guardar el nombre de usuario en el navegador al momento de conectar
+	    localStorage.setItem('mqtt_chat_username', username);
+	    
 
             try {
                 cryptoKey = await getCryptoKey(password);
